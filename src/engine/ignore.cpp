@@ -25,7 +25,8 @@ namespace kestr::engine {
             ".git", ".svn", ".hg",
             "build", "dist", "node_modules",
             "*.o", "*.obj", "*.exe", "*.dll", "*.so", "*.dylib",
-            ".DS_Store", "Thumbs.db"
+            ".DS_Store", "Thumbs.db",
+            "kestr.db", "kestr.db-journal", "kestrd.log", "config.json"
         };
         for (const auto& p : defaults) {
             m_patterns.push_back({std::regex(glob_to_regex(p)), p});
@@ -50,7 +51,7 @@ namespace kestr::engine {
             } else if (c == '?') {
                 regex_str += ".";
             } else if (c == '.') {
-                regex_str += ".";
+                regex_str += "\\.";
             } else if (c == '/') {
                 regex_str += "[/\\\\]"; // Match both separators
             } else {

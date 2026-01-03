@@ -245,13 +245,13 @@ namespace kestr::platform {
             if (m_fd < 0) return "";
             if (write(m_fd, message.c_str(), message.size()) < 0) return "";
 
+            std::string response;
             char buffer[4096];
-            ssize_t len = read(m_fd, buffer, sizeof(buffer) - 1);
-            if (len >= 0) {
-                buffer[len] = '\0';
-                return std::string(buffer);
+            ssize_t len;
+            while ((len = read(m_fd, buffer, sizeof(buffer))) > 0) {
+                response.append(buffer, len);
             }
-            return "";
+            return response;
         }
         
         ~LinuxClient() {

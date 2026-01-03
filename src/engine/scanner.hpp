@@ -4,16 +4,10 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include "kestr/types.hpp"
 #include "ignore.hpp"
 
 namespace kestr::engine {
-
-    struct FileInfo {
-        std::filesystem::path path;
-        std::uintmax_t size;
-        std::filesystem::file_time_type last_write_time;
-        std::string hash;
-    };
 
     class Scanner {
     public:

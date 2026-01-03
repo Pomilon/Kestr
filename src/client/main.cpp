@@ -19,6 +19,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: kestr <command> [args...]\n";
         std::cerr << "Commands:\n";
         std::cerr << "  ping      - Test connection\n";
+        std::cerr << "  status    - Daemon statistics\n";
+        std::cerr << "  query <q> - Search for context\n";
+        std::cerr << "  reindex   - Force full re-scan\n";
         std::cerr << "  shutdown  - Stop the daemon\n";
         return 1;
     }

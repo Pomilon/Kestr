@@ -22,7 +22,6 @@ namespace kestr::engine {
             
             const auto& path = it->path();
             
-            // Check if current entry (file or dir) should be ignored based on its name
             if (m_ignore.check(path)) {
                 if (it->is_directory()) {
                     it.disable_recursion_pending();
