@@ -1,4 +1,7 @@
-# Project Kestr Roadmap
+# Project Kestr Roadmap & Changelog
+
+## Project Status: v0.1.0 (MVP Completed)
+The core "First Delivery" milestones have been achieved. The daemon is functional, stable, and supports local/remote embeddings, vector search, and MCP integration.
 
 ## Phase 1: Foundation (Completed)
 - [x] **Project Skeleton:** CMake build system, cross-platform directory structure.
