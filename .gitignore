@@ -1,0 +1,35 @@
+# Build directory
+build/
+bin/
+lib/
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+kestrd.log
+test_file.txt
+.kestr_ignore
+
+# OS specific
+Thumbs.db
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.o
+*.obj
