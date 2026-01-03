@@ -3,6 +3,7 @@
 #include <sys/inotify.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <poll.h>
 #include <map>
@@ -11,8 +12,28 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <filesystem>
 
 namespace kestr::platform {
+
+    // Helper to determine secure socket path
+    // Priority: XDG_RUNTIME_DIR -> ~/.local/share/kestr/run -> /tmp/kestr-<uid>
+    std::filesystem::path get_socket_full_path(const std::string& name) {
+        std::filesystem::path base_dir;
+        const char* xdg_runtime = std::getenv("XDG_RUNTIME_DIR");
+        
+        if (xdg_runtime) {
+            base_dir = std::filesystem::path(xdg_runtime) / "kestr";
+        } else {
+            const char* home = std::getenv("HOME");
+            if (home) {
+                base_dir = std::filesystem::path(home) / ".local/share/kestr/run";
+            } else {
+                base_dir = std::filesystem::path("/tmp") / ("kestr-" + std::to_string(getuid()));
+            }
+        }
+        return base_dir / name;
+    }
 
     class LinuxSentry : public Sentry {
     public:
@@ -120,14 +141,12 @@ namespace kestr::platform {
             if (event->mask & IN_CREATE) fe.type = FileEvent::Type::Created;
             else if (event->mask & IN_DELETE) fe.type = FileEvent::Type::Deleted;
             else if (event->mask & IN_MODIFY) fe.type = FileEvent::Type::Modified;
-            else if (event->mask & IN_MOVED_FROM) fe.type = FileEvent::Type::Renamed; // Incomplete, needs cookie tracking for TO
+            else if (event->mask & IN_MOVED_FROM) fe.type = FileEvent::Type::Renamed;
             else if (event->mask & IN_MOVED_TO) {
-                // Treated as Created for now or needs cookie logic
                 fe.type = FileEvent::Type::Created; 
             }
             else return;
 
-            // Filter out purely directory events if needed, but we usually want to know
             m_callback(fe);
         }
     };
@@ -138,8 +157,20 @@ namespace kestr::platform {
         ~LinuxBridge() { stop(); }
 
         void listen(const std::string& name) override {
-            m_socket_path = "/tmp/" + name;
-            unlink(m_socket_path.c_str());
+            std::filesystem::path socket_path = get_socket_full_path(name);
+            m_socket_path = socket_path.string();
+            std::filesystem::path parent_dir = socket_path.parent_path();
+
+            // Create directory with secure permissions (0700)
+            if (!std::filesystem::exists(parent_dir)) {
+                std::filesystem::create_directories(parent_dir);
+                std::filesystem::permissions(parent_dir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+            }
+
+            // Remove existing socket file
+            if (std::filesystem::exists(socket_path)) {
+                std::filesystem::remove(socket_path);
+            }
 
             m_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
             if (m_server_fd < 0) {
@@ -153,7 +184,7 @@ namespace kestr::platform {
             strncpy(addr.sun_path, m_socket_path.c_str(), sizeof(addr.sun_path) - 1);
 
             if (bind(m_server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-                std::cerr << "[LinuxBridge] Failed to bind socket: " << strerror(errno) << "\n";
+                std::cerr << "[LinuxBridge] Failed to bind socket: " << strerror(errno) << " (" << m_socket_path << ")\n";
                 close(m_server_fd);
                 m_server_fd = -1;
                 return;
@@ -194,7 +225,9 @@ namespace kestr::platform {
             m_running = false;
             if (m_server_fd >= 0) {
                 close(m_server_fd);
-                unlink(m_socket_path.c_str());
+                if (!m_socket_path.empty()) {
+                    unlink(m_socket_path.c_str());
+                }
                 m_server_fd = -1;
             }
         }
@@ -224,7 +257,8 @@ namespace kestr::platform {
     class LinuxClient : public Client {
     public:
         bool connect(const std::string& name) override {
-            m_socket_path = "/tmp/" + name;
+            m_socket_path = get_socket_full_path(name).string();
+            
             m_fd = socket(AF_UNIX, SOCK_STREAM, 0);
             if (m_fd < 0) return false;
 
@@ -286,6 +320,14 @@ namespace kestr::platform {
             return home ? std::filesystem::path(home) / ".local/share/kestr" : "";
         }
         bool is_daemon_running() {
+            auto client = Client::create();
+            // Assuming default name "kestr.sock" for check
+            // A more robust way would be allowing is_daemon_running to take a name, 
+            // but for now the project seems to use "kestr.sock" hardcoded in mains.
+            if (client->connect("kestr.sock")) {
+                std::string pong = client->send("{\"method\":\"ping\"}");
+                return pong.find("pong") != std::string::npos;
+            }
             return false;
         }
     }

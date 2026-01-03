@@ -30,8 +30,7 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    std::cout << "[Kestr] Starting daemon (v0.1.0)...
-";
+    std::cout << "[Kestr] Starting daemon (v0.1.0)...\n";
 
     // Setup Config Directory
     auto config_dir = kestr::platform::system::get_config_dir();
