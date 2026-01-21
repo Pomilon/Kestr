@@ -28,6 +28,12 @@ namespace kestr::engine {
         bool update_file(const FileInfo& info);
 
         /**
+         * @brief Checks if a file might need re-indexing based on metadata only.
+         * @return true if mtime or size differs from DB.
+         */
+        bool check_metadata(const std::filesystem::path& path, std::uintmax_t size, int64_t mtime);
+
+        /**
          * @brief Checks if a file needs re-indexing based on its hash.
          * @return true if the file hash in DB is different from current hash.
          */
@@ -63,6 +69,17 @@ namespace kestr::engine {
          * Function signature: (id, vector)
          */
         void for_each_vector(std::function<void(int64_t, const std::vector<float>&)> callback);
+
+        /**
+         * @brief Retrieves all indexed file paths.
+         */
+        std::vector<std::string> get_all_files();
+
+        /**
+         * @brief Get statistics.
+         */
+        size_t count_files();
+        size_t count_chunks();
 
     private:
         sqlite3* m_db = nullptr;

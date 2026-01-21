@@ -1,18 +1,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <filesystem>
 #include "platform.hpp"
-
-// Simple JSON helper for avoiding dependency just for this skeleton
-std::string make_json_request(const std::string& method, const std::vector<std::string>& params) {
-    std::string json = "{\"method\": \"" + method + "\", \"params\": [";
-    for (size_t i = 0; i < params.size(); ++i) {
-        json += "\"" + params[i] + "\"";
-        if (i < params.size() - 1) json += ", ";
-    }
-    json += "]}";
-    return json;
-}
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -20,7 +10,8 @@ int main(int argc, char* argv[]) {
         std::cerr << "Commands:\n";
         std::cerr << "  ping      - Test connection\n";
         std::cerr << "  status    - Daemon statistics\n";
-        std::cerr << "  query <q> - Search for context\n";
+        std::cerr << "  watch <p> - Add path to watcher\n";
+        std::cerr << "  query <q> [limit] - Search for context (default limit 5)\n";
         std::cerr << "  reindex   - Force full re-scan\n";
         std::cerr << "  shutdown  - Stop the daemon\n";
         return 1;
@@ -31,6 +22,29 @@ int main(int argc, char* argv[]) {
     for (int i = 2; i < argc; ++i) {
         args.push_back(argv[i]);
     }
+
+    std::string method = command;
+    if (command == "watch") {
+        method = "watch_add";
+        if (!args.empty()) {
+            try {
+                args[0] = std::filesystem::absolute(args[0]).string();
+            } catch (...) {}
+        }
+    }
+
+    // Manual JSON construction to support optional int param for query limit
+    std::string json = "{\"method\": \"" + method + "\", \"params\": [";
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (command == "query" && i == 1) {
+             json += args[i]; // Treat second arg of query as int
+        } else {
+             json += "\"" + args[i] + "\"";
+        }
+        
+        if (i < args.size() - 1) json += ", ";
+    }
+    json += "]}";
 
     auto client = kestr::platform::Client::create();
     if (!client) {
@@ -43,9 +57,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::string request = make_json_request(command, args);
-    std::string response = client->send(request);
-
+    std::string response = client->send(json);
     std::cout << response << "\n";
 
     return 0;

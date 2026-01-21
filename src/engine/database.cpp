@@ -24,6 +24,9 @@ namespace kestr::engine {
     }
 
     bool Database::initialize_schema() {
+        // Enable WAL mode
+        sqlite3_exec(m_db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+
         const char* sql = 
             "CREATE TABLE IF NOT EXISTS files ("
             "  id INTEGER PRIMARY KEY AUTOINCREMENT," 
@@ -50,6 +53,23 @@ namespace kestr::engine {
             return false;
         }
         return true;
+    }
+
+    bool Database::check_metadata(const std::filesystem::path& path, std::uintmax_t size, int64_t mtime) {
+        const char* sql = "SELECT size, last_modified FROM files WHERE path = ?;";
+        sqlite3_stmt* stmt;
+        bool changed = true;
+
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, path.c_str(), -1, SQLITE_STATIC);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                std::uintmax_t db_size = sqlite3_column_int64(stmt, 0);
+                int64_t db_mtime = sqlite3_column_int64(stmt, 1);
+                changed = (db_size != size || db_mtime != mtime);
+            }
+            sqlite3_finalize(stmt);
+        }
+        return changed;
     }
 
     bool Database::needs_indexing(const std::filesystem::path& path, const std::string& current_hash) {
@@ -194,7 +214,13 @@ namespace kestr::engine {
     }
 
     void Database::for_each_vector(std::function<void(int64_t, const std::vector<float>&)> callback) {
-        const char* sql = "SELECT id, embedding FROM chunks WHERE embedding IS NOT NULL;";
+        const char* sql = 
+            "SELECT c.id, c.embedding "
+            "FROM chunks c "
+            "JOIN files f ON c.file_id = f.id "
+            "WHERE c.embedding IS NOT NULL "
+            "ORDER BY f.last_modified DESC;";
+            
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
             while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -211,6 +237,41 @@ namespace kestr::engine {
             }
             sqlite3_finalize(stmt);
         }
+    }
+
+    std::vector<std::string> Database::get_all_files() {
+        std::vector<std::string> files;
+        const char* sql = "SELECT path FROM files;";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                files.push_back(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0)));
+            }
+            sqlite3_finalize(stmt);
+        }
+        return files;
+    }
+
+    size_t Database::count_files() {
+        const char* sql = "SELECT count(*) FROM files;";
+        sqlite3_stmt* stmt;
+        size_t count = 0;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) count = sqlite3_column_int(stmt, 0);
+            sqlite3_finalize(stmt);
+        }
+        return count;
+    }
+
+    size_t Database::count_chunks() {
+        const char* sql = "SELECT count(*) FROM chunks;";
+        sqlite3_stmt* stmt;
+        size_t count = 0;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) count = sqlite3_column_int(stmt, 0);
+            sqlite3_finalize(stmt);
+        }
+        return count;
     }
 
 } 

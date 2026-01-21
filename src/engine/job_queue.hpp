@@ -22,7 +22,7 @@ namespace kestr::engine {
             std::unique_lock<std::mutex> lock(m_mutex);
             m_cv.wait(lock, [this] { return !m_queue.empty() || m_stop; });
             
-            if (m_stop && m_queue.empty()) return false;
+            if (m_stop) return false; // Exit immediately
             
             info = m_queue.front();
             m_queue.pop();

@@ -1,0 +1,16 @@
+[Unit]
+Description=Kestr Semantic Memory Daemon
+After=network.target
+
+[Service]
+ExecStart=%h/.local/bin/kestrd
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=10
+# Ensure logs go to journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

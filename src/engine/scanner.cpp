@@ -34,7 +34,7 @@ namespace kestr::engine {
                 info.path = path;
                 info.size = it->file_size();
                 info.last_write_time = it->last_write_time();
-                info.hash = hash_file(info.path);
+                info.hash = ""; // Do not hash here!
 
                 if (callback) {
                     callback(info);

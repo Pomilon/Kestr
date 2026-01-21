@@ -1,0 +1,6 @@
+{
+    "memory_mode": "hybrid",
+    "hybrid_limit": 5,
+    "embedding_backend": "ollama",
+    "embedding_model": "all-minilm"
+}

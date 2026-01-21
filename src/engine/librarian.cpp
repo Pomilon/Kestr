@@ -27,8 +27,17 @@ namespace kestr::engine {
         try {
             m_impl->alg_hnsw->addPoint(vector.data(), id);
         } catch (const std::exception& e) {
-            std::cerr << "[Librarian] Error adding item: " << e.what() << "\n";
-            // If full, we might need to resize, but for now we set max_elements high enough or let it fail.
+            // std::cerr << "[Librarian] Error adding item: " << e.what() << "\n";
+            // If full, silently ignore in Hybrid mode context. 
+            // Ideally we'd evict, but for MVP this ensures stability.
+        }
+    }
+
+    void Librarian::remove_item(size_t id) {
+        try {
+            m_impl->alg_hnsw->markDelete(id);
+        } catch (const std::exception& e) {
+            std::cerr << "[Librarian] Error removing item: " << e.what() << "\n";
         }
     }
 

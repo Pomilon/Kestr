@@ -20,6 +20,11 @@ namespace kestr::engine {
         void add_item(size_t id, const std::vector<float>& vector);
 
         /**
+         * @brief Marks an item as deleted in the index.
+         */
+        void remove_item(size_t id);
+
+        /**
          * @brief Searches for the nearest neighbors.
          * @param query_vector The query vector.
          * @param k Number of results to return.

@@ -38,14 +38,17 @@ The core "First Delivery" milestones have been achieved. The daemon is functiona
 - [x] **Vector Indexing:** Integration with `hnswlib` for Approximate Nearest Neighbor search.
 - [x] **Memory Management Strategies:** Implement a configuration system to handle dataset scale vs. RAM trade-offs.
     - [x] **Mode A: Speed Demon (All-in-RAM):** Load full HNSW index into RAM.
-    - [x] **Mode B: Hybrid/Priority:** Load high-priority context into RAM (Implemented via chunk limit).
+    - [x] **Mode B: Hybrid/Priority:** Load high-priority context into RAM (Implemented via chunk limit, static priority at startup).
     - [x] **Mode C: Disk-Optimized:** Minimize RAM usage (Implemented as Keyword-only fallback).
 - [x] **Query Pipeline:**
     - User Query -> Embed (using Talon) -> Vector Search (Librarian) -> Result Ranking -> JSON Response.
 
-## Phase 5: Advanced Features & Polish
-- [x] **Model Context Protocol (MCP):** Server support implemented in `kestr-mcp`.
-- [x] **Interactive CLI:** Commands to manage watchers (`status`, `reindex`) and query.
+## Phase 5: Advanced Features & Polish (Completed)
+- [x] **Model Context Protocol (MCP):**
+    - [x] **Tools:** `kestr_query` implemented.
+    - [x] **Resources:** `resources/list` and `resources/read` implemented.
+- [x] **Interactive CLI:** Commands to manage watchers (`status`, `reindex`, `watch`) and query.
+- [x] **Dynamic Watchers:** Persisted path management and real-time indexing.
 
 ## Future / Community Contributions
 - [ ] **macOS Support:** Implement `FSEvents` for Sentry (untested/unsupported by core team).

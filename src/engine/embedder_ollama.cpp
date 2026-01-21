@@ -11,11 +11,9 @@ namespace kestr::engine {
     public:
         OllamaEmbedder(const std::string& model = "all-minilm", const std::string& endpoint = "http://localhost:11434/api/embeddings")
             : m_model(model), m_endpoint(endpoint) {
-            curl_global_init(CURL_GLOBAL_DEFAULT);
         }
 
         ~OllamaEmbedder() {
-            curl_global_cleanup();
         }
 
         std::vector<float> embed(const std::string& text) override {

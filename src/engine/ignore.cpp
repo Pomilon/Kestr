@@ -26,7 +26,8 @@ namespace kestr::engine {
             "build", "dist", "node_modules",
             "*.o", "*.obj", "*.exe", "*.dll", "*.so", "*.dylib",
             ".DS_Store", "Thumbs.db",
-            "kestr.db", "kestr.db-journal", "kestrd.log", "config.json"
+            "kestr.db", "kestr.db-journal", "kestrd.log", "config.json",
+            "model.onnx", "vocab.txt"
         };
         for (const auto& p : defaults) {
             m_patterns.push_back({std::regex(glob_to_regex(p)), p});

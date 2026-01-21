@@ -61,7 +61,50 @@ int main() {
                 continue; // No response needed
             }
 
-            // 3. List Tools
+            // 3. Resources List
+            if (method == "resources/list") {
+                json bridge_req = {{"method", "resource_list"}, {"params", {}}};
+                std::string bridge_resp_str = client->send(bridge_req.dump());
+                auto bridge_resp = json::parse(bridge_resp_str);
+                
+                json resources = json::array();
+                if (bridge_resp.contains("result")) {
+                    for (const auto& path : bridge_resp["result"]) {
+                        resources.push_back({
+                            {"uri", "kestr://" + std::string(path)},
+                            {"name", path},
+                            {"mimeType", "text/plain"} 
+                        });
+                    }
+                }
+                send_response(id, {{"resources", resources}});
+                continue;
+            }
+
+            // 4. Resources Read
+            if (method == "resources/read") {
+                auto params = req.value("params", json::object());
+                std::string uri = params.value("uri", "");
+                
+                json bridge_req = {{"method", "resource_read"}, {"params", {uri}}};
+                std::string bridge_resp_str = client->send(bridge_req.dump());
+                auto bridge_resp = json::parse(bridge_resp_str);
+
+                if (bridge_resp.contains("result") && bridge_resp["result"].contains("content")) {
+                    send_response(id, {
+                        {"contents", {{
+                            {"uri", uri},
+                            {"mimeType", "text/plain"},
+                            {"text", bridge_resp["result"]["content"]}
+                        }}}
+                    });
+                } else {
+                    send_error(id, -32002, "Resource not found or error reading");
+                }
+                continue;
+            }
+
+            // 5. List Tools
             if (method == "tools/list") {
                 json result = {
                     {"tools", {
@@ -90,12 +133,12 @@ int main() {
 
                 if (name == "kestr_query") {
                     std::string q = args.value("query", "");
+                    int limit = args.value("limit", 5);
                     
                     // Forward to Daemon via IPC
-                    // We reuse the existing simple JSON-RPC of the bridge: {"method": "query", "params": ["q"]}
                     json bridge_req = {
                         {"method", "query"},
-                        {"params", {q}}
+                        {"params", {q, limit}}
                     };
                     
                     std::string bridge_resp_str = client->send(bridge_req.dump());

@@ -12,11 +12,9 @@ namespace kestr::engine {
     public:
         OpenAIEmbedder(const std::string& api_key, const std::string& model = "text-embedding-3-small")
             : m_api_key(api_key), m_model(model) {
-            curl_global_init(CURL_GLOBAL_DEFAULT);
         }
 
         ~OpenAIEmbedder() {
-            curl_global_cleanup();
         }
 
         std::vector<float> embed(const std::string& text) override {
