@@ -16,6 +16,8 @@
 #include "engine/librarian.hpp"
 #include "engine/config.hpp"
 #include "engine/job_queue.hpp"
+#include "engine/text_chunker.hpp"
+#include "engine/treesitter_parser.hpp"
 #include <nlohmann/json.hpp>
 #include <curl/curl.h>
 
@@ -26,6 +28,29 @@ std::mutex g_db_mutex;
 void signal_handler(int signum) {
     std::cout << "\n[Kestr] Interrupt signal (" << signum << ") received. Shutting down..." << std::endl;
     g_running = false;
+}
+
+// Helper to determine if a file should use tree-sitter
+bool should_use_treesitter(const std::filesystem::path& path) {
+    std::string ext = path.extension().string();
+    return ext == ".py" || ext == ".cpp" || ext == ".hpp" || ext == ".h" || ext == ".cc" || 
+           ext == ".go" || ext == ".rs" || ext == ".js" || ext == ".ts";
+}
+
+// Helper to map extension to language string
+std::string extension_to_language(const std::filesystem::path& path) {
+    std::string ext = path.extension().string();
+    if (ext == ".cpp" || ext == ".hpp" || ext == ".h" || ext == ".cc") return "cpp";
+    if (ext == ".py") return "python";
+    if (ext == ".js" || ext == ".jsx") return "javascript";
+    if (ext == ".ts" || ext == ".tsx") return "typescript";
+    if (ext == ".go") return "go";
+    if (ext == ".rs") return "rust";
+    if (ext == ".md") return "markdown";
+    if (ext == ".json") return "json";
+    if (ext == ".txt") return "text";
+    if (!ext.empty() && ext[0] == '.') return ext.substr(1);
+    return "unknown";
 }
 
 int main(int argc, char* argv[]) {
@@ -67,6 +92,9 @@ int main(int argc, char* argv[]) {
     if (config.embedding_backend == "openai" && !config.openai_key.empty()) {
         std::cout << "[Kestr] Using OpenAI Embedder." << std::endl;
         embedder = kestr::engine::create_openai_embedder(config.openai_key);
+    } else if (config.embedding_backend == "none") {
+        std::cout << "[Kestr] Using Dummy Embedder (none)." << std::endl;
+        embedder = kestr::engine::create_dummy_embedder();
     } else {
         std::filesystem::path model_path = data_dir / "model.onnx";
         std::filesystem::path vocab_path = data_dir / "vocab.txt";
@@ -144,7 +172,7 @@ int main(int argc, char* argv[]) {
             kestr::engine::FileInfo info;
             if (queue.pop(info)) {
                 std::string ext = info.path.extension().string();
-                if (ext != ".cpp" && ext != ".hpp" && ext != ".h" && ext != ".md" && ext != ".txt" && ext != ".json") continue;
+                if (ext != ".cpp" && ext != ".hpp" && ext != ".h" && ext != ".md" && ext != ".txt" && ext != ".json" && ext != ".py" && ext != ".js" && ext != ".ts" && ext != ".go" && ext != ".rs") continue;
                 
                 // 1. Compute Hash in Background
                 std::string current_hash = hasher_scanner.hash_file(info.path);
@@ -165,14 +193,29 @@ int main(int argc, char* argv[]) {
                 std::stringstream buffer;
                 buffer << file.rdbuf();
                 std::string content = buffer.str();
-                auto chunks = kestr::engine::Chunker::chunk_file(content, 100, 10);
+                
+                std::string lang = extension_to_language(info.path);
+                std::vector<kestr::engine::Chunk> chunks;
+
+                // Attempt Tree-sitter parsing for supported languages
+                if (should_use_treesitter(info.path)) {
+                    kestr::engine::TreeSitterParser ts_parser;
+                    chunks = ts_parser.parse(content, lang);
+                }
+
+                // Fallback: Use TextChunker if Tree-sitter didn't produce any chunks (or not supported)
+                if (chunks.empty()) {
+                    chunks = kestr::engine::TextChunker::chunk(content, 4000, 0.15f);
+                }
                 
                 struct PreparedChunk {
                     kestr::engine::Chunk chunk;
                     std::vector<float> vector;
                 };
                 std::vector<PreparedChunk> prepared;
-                for (const auto& c : chunks) {
+                for (auto& c : chunks) {
+                    c.language = lang;
+                    c.project_root = info.project_root; // Set project_root for each chunk
                     std::vector<float> v;
                     if (embedder) v = embedder->embed(c.content);
                     prepared.push_back({c, v});
@@ -195,7 +238,8 @@ int main(int argc, char* argv[]) {
     kestr::engine::Scanner scanner;
     auto scan_directory = [&](const std::filesystem::path& root) {
         std::cout << "[Kestr] Scanning: " << root << std::endl;
-        scanner.scan(root, [&](const kestr::engine::FileInfo& info) {
+        scanner.scan(root, [&](kestr::engine::FileInfo info) {
+            info.project_root = root.string(); // Set project_root during initial scan
             bool metadata_changed;
             {
                 std::lock_guard<std::mutex> lock(g_db_mutex);
@@ -265,6 +309,12 @@ int main(int argc, char* argv[]) {
                 if (params.empty()) return "{\"error\": \"missing query\"}";
                 std::string q = params[0];
                 int limit = (params.size() > 1 && params[1].is_number()) ? params[1].get<int>() : 5;
+                
+                kestr::engine::SearchFilters filters;
+                if (params.size() > 2 && params[2].is_string()) filters.type_filter = params[2];
+                if (params.size() > 3 && params[3].is_string()) filters.language = params[3];
+                if (params.size() > 4 && params[4].is_string()) filters.scope = params[4];
+
                 nlohmann::json res_json = nlohmann::json::array();
                 if (embedder && librarian) {
                     auto vec = embedder->embed(q);
@@ -273,14 +323,20 @@ int main(int argc, char* argv[]) {
                         std::lock_guard<std::mutex> lock(g_db_mutex);
                         for (auto id : ids) {
                             auto c = db.get_chunk(id);
-                            res_json.push_back({{"type", "semantic"}, {"content", c.content}, {"lines", {c.start_line, c.end_line}}});
+                            
+                            // Apply filters manually for semantic search for now
+                            if (!filters.type_filter.empty() && c.symbol_type != filters.type_filter) continue;
+                            if (!filters.language.empty() && c.language != filters.language) continue;
+                            if (!filters.scope.empty() && c.project_root != filters.scope) continue;
+
+                            res_json.push_back({{"type", "semantic"}, {"content", c.content}, {"lines", {c.start_line, c.end_line}}, {"symbol", c.symbol_name}, {"symbol_type", c.symbol_type}});
                         }
                     }
                 }
                 if (res_json.empty()) {
                     std::lock_guard<std::mutex> lock(g_db_mutex);
-                    for (const auto& c : db.search_keywords(q, limit)) {
-                        res_json.push_back({{"type", "keyword"}, {"content", c.content}, {"lines", {c.start_line, c.end_line}}});
+                    for (const auto& c : db.query(q, limit, filters)) {
+                        res_json.push_back({{"type", "keyword"}, {"content", c.content}, {"lines", {c.start_line, c.end_line}}, {"symbol", c.symbol_name}, {"symbol_type", c.symbol_type}});
                     }
                 }
                 return nlohmann::json({{"result", res_json}}).dump();
@@ -293,6 +349,15 @@ int main(int argc, char* argv[]) {
          if (event.type != kestr::platform::FileEvent::Type::Deleted) {
             kestr::engine::FileInfo info;
             info.path = event.path;
+            
+            // Find which watch_path this file belongs to
+            for (const auto& wp : config.watch_paths) {
+                if (event.path.string().find(wp) == 0) {
+                    info.project_root = wp;
+                    break;
+                }
+            }
+
             try {
                 info.size = std::filesystem::file_size(event.path);
                 info.last_write_time = std::filesystem::last_write_time(event.path);

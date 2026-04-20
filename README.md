@@ -7,14 +7,17 @@ It implements the **Model Context Protocol (MCP)**, making it plug-and-play comp
 ## Features
 
 *   **Sentry (File Watcher):** Real-time, recursive file monitoring using `inotify` (Linux). Automatically detects changes and queues files for re-indexing.
+*   **Structural Parsing (Tree-sitter):** High-fidelity AST-based indexing for code. Extracts functions and classes with their names and exact line ranges. Supported languages:
+    *   **Python, C++, Go, Rust, JavaScript, TypeScript.**
+*   **Recursive Fallback Chunker:** Smart hierarchical splitting for documentation and unsupported languages. Splits by paragraphs, lines, and spaces with context-preserving overlap.
 *   **Talon (Embeddings):** Flexible embedding engine supporting:
-    *   **Local ONNX:** Runs `all-MiniLM-L6-v2` locally using ONNX Runtime (No GPU required).
+    *   **Local ONNX:** Runs `all-MiniLM-L6-v2` locally using ONNX Runtime.
     *   **Ollama:** Connects to a local Ollama instance (default fallback).
     *   **OpenAI:** Uses OpenAI's `text-embedding-3-small` (requires API key).
 *   **The Librarian (Search):** Hybrid search engine combining:
     *   **Vector Search:** In-memory HNSW index for semantic understanding.
-    *   **Keyword Search:** SQLite-backed fallback for exact matches or low-memory environments.
-*   **The Cache:** Persistent SQLite storage for incremental updates (skips unchanged files).
+    *   **Filtered Keyword Search:** Filter by symbol type, language, or project scope.
+*   **The Cache:** Persistent SQLite storage with deep structural metadata.
 *   **MCP Server:** Native integration with the Model Context Protocol.
 
 ## Installation
@@ -33,12 +36,13 @@ This script will:
 5.  (Optional) Install and enable the `systemd` user service.
 
 ### Manual Build
-**Prerequisites:** Linux (x64), C++20 (GCC 11+/Clang 14+), CMake 3.20+, SQLite3, CURL.
+**Prerequisites:** Linux (x64), C++20 (GCC 11+/Clang 14+), CMake 3.20+, SQLite3, CURL, Python3 (for tests).
 
 ```bash
 mkdir build && cd build
 cmake ..
 cmake --build . --parallel
+ctest --output-on-failure
 ```
 
 ## Configuration
@@ -97,7 +101,7 @@ kestrd
 Interact with the daemon using the `kestr` client:
 
 ```bash
-# Check status (Queue size, Memory usage, Watch paths)
+# Check status (Queue size, Indexing progress, Memory usage)
 kestr status
 
 # Add a directory to watch
@@ -105,12 +109,6 @@ kestr watch /path/to/project
 
 # Semantic Search (Default limit: 5)
 kestr query "How does the file watcher work?"
-
-# Semantic Search with custom limit
-kestr query "platform abstraction" 10
-
-# Force Re-indexing (Scans all watch paths)
-kestr reindex
 
 # Stop the daemon
 kestr shutdown
@@ -131,10 +129,11 @@ To use Kestr with MCP clients (like Claude Desktop), configure the tool to run `
   }
 }
 ```
-*Note: Ensure `kestrd` is running for `kestr-mcp` to work.*
 
 ### Available MCP Tools & Resources
-*   **Tool:** `kestr_query` - Search the codebase. Params: `query` (string), `limit` (int, optional).
+*   **Tool:** `kestr_query` - Search the codebase.
+    *   **Params:** `query` (string), `limit` (int), `type_filter` (e.g. 'function'), `language` (e.g. 'python'), `scope` (project root).
+*   **Tool:** `kestr_status` - Get daemon indexing status and stats.
 *   **Resource:** `kestr://<path>` - Read any indexed file content.
 *   **Resource List:** Browse all indexed files.
 

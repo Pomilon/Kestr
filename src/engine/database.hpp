@@ -55,6 +55,11 @@ namespace kestr::engine {
         bool insert_chunk(const std::filesystem::path& file_path, const Chunk& chunk, const std::vector<float>& embedding);
 
         /**
+         * @brief Searches for chunks containing the given keyword, with optional filters.
+         */
+        std::vector<Chunk> query(const std::string& text, int limit = 5, const SearchFilters& filters = {});
+
+        /**
          * @brief Searches for chunks containing the given keyword.
          */
         std::vector<Chunk> search_keywords(const std::string& query, int limit = 5);

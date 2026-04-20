@@ -38,5 +38,6 @@ namespace kestr::engine {
     std::unique_ptr<Embedder> create_ollama_embedder(const std::string& model);
     std::unique_ptr<Embedder> create_onnx_embedder(const std::string& model_path, const std::string& vocab_path);
     std::unique_ptr<Embedder> create_openai_embedder(const std::string& api_key, const std::string& model = "text-embedding-3-small");
+    std::unique_ptr<Embedder> create_dummy_embedder();
 
 }

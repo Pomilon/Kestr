@@ -50,6 +50,23 @@ The core "First Delivery" milestones have been achieved. The daemon is functiona
 - [x] **Interactive CLI:** Commands to manage watchers (`status`, `reindex`, `watch`) and query.
 - [x] **Dynamic Watchers:** Persisted path management and real-time indexing.
 
+## Phase 6: High-Fidelity Structural Parsing (Completed)
+**Goal:** Deep structural understanding for code.
+- [x] **Tree-sitter Integration:**
+    - [x] Multi-language AST parsing (Python, C++, Go, Rust, JavaScript, TypeScript).
+    - [x] Structural extraction of classes and functions with metadata (names, types, line ranges).
+- [x] **Hybrid Chunking Strategy:**
+    - [x] Hierarchical `TextChunker` for documentation and fallback.
+    - [x] 15% overlap for sequential chunks to preserve context.
+- [x] **Database & API Upgrades:**
+    - [x] Schema expansion for structural metadata.
+    - [x] MCP `kestr_query` filtered search (by type, language, scope).
+    - [x] MCP `kestr_status` for indexing observability.
+- [x] **Verification & Stability:**
+    - [x] Comprehensive unit tests for all parsers and chunkers.
+    - [x] End-to-end integration tests for the full pipeline.
+    - [x] Automated CI/CD (GitHub Actions).
+
 ## Future / Community Contributions
-- [ ] **macOS Support:** Implement `FSEvents` for Sentry (untested/unsupported by core team).
+- [ ] **macOS Support:** Implement `FSEvents` for Sentry.
 - [ ] **Semantic Ranking:** Weight results based on file type (code vs docs) or recency.
