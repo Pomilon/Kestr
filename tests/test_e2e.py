@@ -11,6 +11,20 @@ def test_e2e():
         shutil.rmtree(tmp_dir)
     os.makedirs(tmp_dir)
 
+    # Create mock project internally
+    project_path = os.path.join(tmp_dir, "e2e_project")
+    os.makedirs(os.path.join(project_path, "src"), exist_ok=True)
+    os.makedirs(os.path.join(project_path, "docs"), exist_ok=True)
+
+    with open(os.path.join(project_path, "src", "math_utils.py"), "w") as f:
+        f.write("""class Calculator:\n    \"\"\"A simple calculator class.\"\"\"\n    def add(self, a, b):\n        return a + b\n\n    def subtract(self, a, b):\n        return a - b\n\ndef power(base, exp):\n    return base ** exp\n""")
+
+    with open(os.path.join(project_path, "README.md"), "w") as f:
+        f.write("# E2E Project\\nThis is a test project for Kestr end-to-end verification.\\nIt contains some python code and documentation.\\n")
+
+    with open(os.path.join(project_path, "docs", "notes.txt"), "w") as f:
+        f.write("Important notes:\\n1. Tree-sitter should parse math_utils.py.\\n2. TextChunker should parse this file.\\n3. Keywords like 'calculator' or 'power' should return results.\\n")
+
     runtime_dir = os.path.join(tmp_dir, "runtime")
     config_dir = os.path.join(tmp_dir, ".config", "kestr")
     data_dir = os.path.join(tmp_dir, ".local", "share", "kestr")
@@ -18,13 +32,6 @@ def test_e2e():
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(data_dir, exist_ok=True)
 
-    project_path = os.path.join(cwd, "e2e_project")
-    # Make sure project_path is absolute and exists
-    project_path = os.path.abspath(project_path)
-    if not os.path.exists(project_path):
-        # Maybe we are in build dir
-        project_path = os.path.abspath(os.path.join(cwd, "..", "e2e_project"))
-    
     print(f"DEBUG project_path: {project_path}")
 
     test_env = {
