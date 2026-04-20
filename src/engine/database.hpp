@@ -55,6 +55,21 @@ namespace kestr::engine {
         bool insert_chunk(const std::filesystem::path& file_path, const Chunk& chunk, const std::vector<float>& embedding);
 
         /**
+         * @brief Inserts multiple chunks into the database and returns their IDs.
+         */
+        std::vector<int64_t> insert_chunks(const std::filesystem::path& file_path, const std::vector<Chunk>& chunks, const std::vector<std::vector<float>>& embeddings);
+
+        /**
+         * @brief Starts an explicit transaction.
+         */
+        void begin_transaction();
+
+        /**
+         * @brief Commits an explicit transaction.
+         */
+        void commit_transaction();
+
+        /**
          * @brief Searches for chunks containing the given keyword, with optional filters.
          */
         std::vector<Chunk> query(const std::string& text, int limit = 5, const SearchFilters& filters = {});

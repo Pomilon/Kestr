@@ -166,74 +166,96 @@ int main(int argc, char* argv[]) {
 
     // 5. Worker Logic
     kestr::engine::JobQueue queue;
-    std::thread worker_thread([&]() {
-        kestr::engine::Scanner hasher_scanner; // Used for hash_file
-        while (g_running) {
-            kestr::engine::FileInfo info;
-            if (queue.pop(info)) {
-                std::string ext = info.path.extension().string();
-                if (ext != ".cpp" && ext != ".hpp" && ext != ".h" && ext != ".md" && ext != ".txt" && ext != ".json" && ext != ".py" && ext != ".js" && ext != ".ts" && ext != ".go" && ext != ".rs") continue;
-                
-                // 1. Compute Hash in Background
-                std::string current_hash = hasher_scanner.hash_file(info.path);
-                
-                // 2. Deep Check (Hash)
-                {
-                    std::lock_guard<std::mutex> lock(g_db_mutex);
-                    if (!db.needs_indexing(info.path, current_hash)) {
-                        continue; 
+    std::vector<std::thread> workers;
+    size_t num_workers = std::max(1u, std::thread::hardware_concurrency());
+    std::cout << "[Kestr] Spawning " << num_workers << " worker threads." << std::endl;
+
+    for (size_t i = 0; i < num_workers; ++i) {
+        workers.emplace_back([&]() {
+            kestr::engine::Scanner hasher_scanner; 
+            int pending_commits = 0;
+
+            while (g_running) {
+                kestr::engine::FileInfo info;
+                bool got_job = queue.pop(info);
+
+                if (got_job) {
+                    std::string ext = info.path.extension().string();
+                    if (ext != ".cpp" && ext != ".hpp" && ext != ".h" && ext != ".md" && ext != ".txt" && ext != ".json" && ext != ".py" && ext != ".js" && ext != ".ts" && ext != ".go" && ext != ".rs") continue;
+                    
+                    std::string current_hash = hasher_scanner.hash_file(info.path);
+                    
+                    {
+                        std::lock_guard<std::mutex> lock(g_db_mutex);
+                        if (!db.needs_indexing(info.path, current_hash)) continue; 
                     }
-                }
 
-                std::cout << "[Worker] Indexing: " << info.path.filename() << std::endl;
-                info.hash = current_hash;
-                
-                std::ifstream file(info.path);
-                if (!file.is_open()) continue;
-                std::stringstream buffer;
-                buffer << file.rdbuf();
-                std::string content = buffer.str();
-                
-                std::string lang = extension_to_language(info.path);
-                std::vector<kestr::engine::Chunk> chunks;
+                    info.hash = current_hash;
 
-                // Attempt Tree-sitter parsing for supported languages
-                if (should_use_treesitter(info.path)) {
-                    kestr::engine::TreeSitterParser ts_parser;
-                    chunks = ts_parser.parse(content, lang);
-                }
-
-                // Fallback: Use TextChunker if Tree-sitter didn't produce any chunks (or not supported)
-                if (chunks.empty()) {
-                    chunks = kestr::engine::TextChunker::chunk(content, 4000, 0.15f);
-                }
-                
-                struct PreparedChunk {
-                    kestr::engine::Chunk chunk;
-                    std::vector<float> vector;
-                };
-                std::vector<PreparedChunk> prepared;
-                for (auto& c : chunks) {
-                    c.language = lang;
-                    c.project_root = info.project_root; // Set project_root for each chunk
-                    std::vector<float> v;
-                    if (embedder) v = embedder->embed(c.content);
-                    prepared.push_back({c, v});
-                }
-
-                {
-                    std::lock_guard<std::mutex> lock(g_db_mutex);
-                    db.update_file(info);
-                    for (const auto& pc : prepared) {
-                        int64_t chunk_id = db.insert_chunk(info.path, pc.chunk, pc.vector); 
-                        if (chunk_id > 0 && !pc.vector.empty() && librarian) librarian->add_item(chunk_id, pc.vector);
+                    std::string content;
+                    try {
+                        std::ifstream file(info.path, std::ios::binary);
+                        if (!file.is_open()) continue;
+                        auto size = std::filesystem::file_size(info.path);
+                        content.resize(size);
+                        file.read(&content[0], size);
+                    } catch (...) {
+                        continue;
                     }
-                    db.set_indexed_status(info.path, true);
+
+                    std::string lang = extension_to_language(info.path);                    std::vector<kestr::engine::Chunk> chunks;
+
+                    if (should_use_treesitter(info.path)) {
+                        kestr::engine::TreeSitterParser ts_parser;
+                        chunks = ts_parser.parse(content, lang);
+                    }
+
+                    if (chunks.empty()) {
+                        chunks = kestr::engine::TextChunker::chunk(content, 4000, 0.15f);
+                    }
+                    
+                    std::vector<std::vector<float>> embeddings;
+                    for (auto& c : chunks) {
+                        c.language = lang;
+                        c.project_root = info.project_root;
+                        if (embedder) embeddings.push_back(embedder->embed(c.content));
+                        else embeddings.push_back({});
+                    }
+
+                    {
+                        std::lock_guard<std::mutex> lock(g_db_mutex);
+                        if (pending_commits == 0) db.begin_transaction();
+                        
+                        db.update_file(info);
+                        auto ids = db.insert_chunks(info.path, chunks, embeddings);
+                        
+                        if (librarian) {
+                            for (size_t i = 0; i < ids.size(); ++i) {
+                                if (i < embeddings.size() && !embeddings[i].empty()) {
+                                    librarian->add_item(ids[i], embeddings[i]);
+                                }
+                            }
+                        }
+
+                        db.set_indexed_status(info.path, true);
+                        
+                        pending_commits++;
+                        if (pending_commits >= 10) {
+                            db.commit_transaction();
+                            pending_commits = 0;
+                        }
+                    }
+                } else {
+                    if (pending_commits > 0) {
+                        std::lock_guard<std::mutex> lock(g_db_mutex);
+                        db.commit_transaction();
+                        pending_commits = 0;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
-                std::cout << "[Worker] Finished: " << info.path.filename() << std::endl;
             }
-        }
-    });
+        });
+    }
 
     kestr::engine::Scanner scanner;
     auto scan_directory = [&](const std::filesystem::path& root) {
@@ -395,7 +417,9 @@ int main(int argc, char* argv[]) {
     while (g_running) std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     queue.stop(); sentry->stop(); bridge->stop();
-    if (worker_thread.joinable()) worker_thread.join();
+    for (auto& worker : workers) {
+        if (worker.joinable()) worker.join();
+    }
     if (bridge_thread.joinable()) bridge_thread.join();
     if (sentry_thread.joinable()) sentry_thread.join();
 
