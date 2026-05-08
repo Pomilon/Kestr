@@ -33,10 +33,10 @@ void test_new_db() {
 
     auto results = db.search_keywords("main", 1);
     assert(!results.empty());
-    assert(results[0].symbol_name == "main");
-    assert(results[0].symbol_type == "function");
-    assert(results[0].project_root == "/tmp/test");
-    assert(results[0].language == "cpp");
+    assert(results[0].second.symbol_name == "main");
+    assert(results[0].second.symbol_type == "function");
+    assert(results[0].second.project_root == "/tmp/test");
+    assert(results[0].second.language == "cpp");
 
     std::cout << "New database test passed!" << std::endl;
     db.close();
@@ -49,8 +49,8 @@ void test_migration() {
     if (std::filesystem::exists(db_path)) std::filesystem::remove(db_path);
 
     // Create a "legacy" database manually
-    sqlite3* raw_db;
-    assert(sqlite3_open(db_path.c_str(), &raw_db) == SQLITE_OK);
+    sqlite3* raw_db = nullptr;
+    assert(sqlite3_open(db_path.string().c_str(), &raw_db) == SQLITE_OK);
     const char* legacy_sql = 
         "CREATE TABLE files (id INTEGER PRIMARY KEY, path TEXT UNIQUE, hash TEXT, last_modified INTEGER, size INTEGER, is_indexed INTEGER);"
         "CREATE TABLE chunks (id INTEGER PRIMARY KEY, file_id INTEGER, content TEXT, start_line INTEGER, end_line INTEGER, embedding BLOB);";
@@ -74,8 +74,8 @@ void test_migration() {
 
     auto results = db.search_keywords("MyClass", 1);
     assert(!results.empty());
-    assert(results[0].symbol_name == "MyClass");
-    assert(results[0].symbol_type == "class");
+    assert(results[0].second.symbol_name == "MyClass");
+    assert(results[0].second.symbol_type == "class");
 
     std::cout << "Migration test passed!" << std::endl;
     db.close();

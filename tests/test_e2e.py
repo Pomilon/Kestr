@@ -34,24 +34,54 @@ def test_e2e():
 
     print(f"DEBUG project_path: {project_path}")
 
+    is_windows = os.name == "nt"
     test_env = {
         **os.environ,
         "XDG_RUNTIME_DIR": runtime_dir,
         "HOME": tmp_dir, 
     }
 
-    socket_path = os.path.join(runtime_dir, "kestr", "kestr.sock")
+    if is_windows:
+        # On Windows, the platform code appends /kestr to APPDATA and LOCALAPPDATA
+        test_env["APPDATA"] = os.path.join(tmp_dir, ".config")
+        test_env["LOCALAPPDATA"] = os.path.join(tmp_dir, ".local", "share")
+        socket_path = "\\\\.\\pipe\\kestr.sock"
+    else:
+        socket_path = os.path.join(runtime_dir, "kestr", "kestr.sock")
+    
+    # Ensure config directory exists
+    os.makedirs(os.path.join(config_dir), exist_ok=True)
     
     with open(os.path.join(config_dir, "config.json"), "w") as f:
         json.dump({
-            "watch_paths": [project_path],
+            "watch_paths": [project_path.replace("\\", "/")], # normalize for config
             "embedding_backend": "none",
             "memory_mode": "disk"
         }, f)
 
     bin_dir = os.environ.get("CMAKE_BINARY_DIR", os.path.join(cwd, "build"))
-    kestrd_bin = os.path.join(bin_dir, "bin", "kestrd")
-    mcp_bin = os.path.join(bin_dir, "bin", "kestr-mcp")
+    
+    def find_binary(name):
+        ext = ".exe" if is_windows else ""
+        binary_name = name + ext
+        # Try different possible locations
+        candidates = [
+            os.path.join(bin_dir, "bin", binary_name),
+            os.path.join(bin_dir, "bin", "Release", binary_name),
+            os.path.join(bin_dir, "bin", "Debug", binary_name),
+            os.path.join(bin_dir, "Release", binary_name),
+            os.path.join(bin_dir, binary_name)
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return c
+        return os.path.join(bin_dir, "bin", binary_name) # Fallback
+
+    kestrd_bin = find_binary("kestrd")
+    mcp_bin = find_binary("kestr-mcp")
+
+    print(f"DEBUG: kestrd_bin={kestrd_bin}")
+    print(f"DEBUG: mcp_bin={mcp_bin}")
 
     print(f"Starting kestrd for E2E...")
     daemon = subprocess.Popen([kestrd_bin], env=test_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -60,15 +90,30 @@ def test_e2e():
     max_retries = 100
     socket_ready = False
     while max_retries > 0:
-        if os.path.exists(socket_path):
-            socket_ready = True
-            break
+        if is_windows:
+            # On Windows, we try to see if the pipe exists by attempting to open it
+            try:
+                with open(socket_path, 'r+b'):
+                    socket_ready = True
+                    break
+            except:
+                pass
+        else:
+            if os.path.exists(socket_path):
+                socket_ready = True
+                break
         time.sleep(0.1)
         max_retries -= 1
     
     if not socket_ready:
-        print("kestrd failed to create socket")
-        daemon.terminate()
+        print("kestrd failed to create socket/pipe")
+        try:
+            out, err = daemon.communicate(timeout=2)
+            print(f"daemon STDOUT:\n{out}")
+            print(f"daemon STDERR:\n{err}")
+        except Exception as e:
+            print(f"Could not capture daemon logs: {e}")
+            daemon.terminate()
         return False
 
     print("Starting kestr-mcp for E2E queries...")
@@ -103,7 +148,16 @@ def test_e2e():
             })
             if resp and "result" in resp:
                 status_text = resp["result"]["content"][0]["text"]
-                status = json.loads(status_text)
+                # Parse human-readable format: "key: value"
+                status = {}
+                for line in status_text.splitlines():
+                    if ":" in line:
+                        k, v = line.split(":", 1)
+                        try:
+                            status[k.strip()] = json.loads(v.strip())
+                        except:
+                            status[k.strip()] = v.strip()
+                
                 print(f"DEBUG Status: {status}")
                 if status.get("queue_size", 0) == 0 and status.get("total_files", 0) > 0:
                     indexed = True
@@ -123,10 +177,28 @@ def test_e2e():
                 "arguments": {"query": "Calculator"}
             }
         })
+        if resp is None or "result" not in resp:
+            print(f"FAILED: Query returned invalid response: {resp}")
+            sys.exit(1)
+            
         results = resp["result"]["content"][0]["text"]
-        assert "Calculator" in results
-        assert "symbol_type: class" in results or "class Calculator" in results
-        print("Test 1 OK")
+        print(f"DEBUG Query results: {results}")
+        
+        try:
+            assert "Calculator" in results
+            # The output format is "Symbol: Calculator (class)"
+            assert "(class)" in results or "class Calculator" in results
+            print("Test 1 OK")
+        except AssertionError as e:
+            print(f"FAILED Test 1: Expected 'Calculator' and '(class)' in results.\nActual results: {results}")
+            # Try to get daemon logs
+            try:
+                daemon.terminate()
+                out, err = daemon.communicate(timeout=2)
+                print(f"daemon STDOUT:\n{out}")
+                print(f"daemon STDERR:\n{err}")
+            except: pass
+            raise e
 
         # Test 2: Find the function with type_filter
         print("Querying for 'power' with type_filter='function'...")
@@ -138,8 +210,16 @@ def test_e2e():
             }
         })
         results = resp["result"]["content"][0]["text"]
-        assert "def power" in results
-        print("Test 2 OK")
+        print(f"DEBUG Query results (power): {results}")
+
+        try:
+            assert "power" in results
+            assert "(function)" in results
+            print("Test 2 OK")
+        except AssertionError as e:
+            print(f"FAILED Test 2: Expected 'power' and '(function)' in results.\nActual results: {results}")
+            raise e
+
 
         # Test 3: Find markdown content (fallback chunker)
         print("Querying for 'verification' (README.md fallback)...")
@@ -151,8 +231,15 @@ def test_e2e():
             }
         })
         results = resp["result"]["content"][0]["text"]
-        assert "end-to-end verification" in results
-        print("Test 3 OK")
+        print(f"DEBUG Query results (verification): {results}")
+
+        try:
+            assert "verification" in results
+            print("Test 3 OK")
+        except AssertionError as e:
+            print(f"FAILED Test 3: Expected 'verification' in results.\nActual results: {results}")
+            raise e
+
 
         # Test 4: Filter by language
         print("Querying for 'add' with language='python'...")

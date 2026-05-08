@@ -1,6 +1,6 @@
 # Project Kestr Roadmap & Changelog
 
-## Project Status: v0.1.0 (MVP Completed)
+## Project Status: v0.2.0 (Hybrid Search & Language Expansion)
 The core "First Delivery" milestones have been achieved. The daemon is functional, stable, and supports local/remote embeddings, vector search, and MCP integration.
 
 ## Phase 1: Foundation (Completed)

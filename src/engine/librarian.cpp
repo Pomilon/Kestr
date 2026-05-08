@@ -11,7 +11,8 @@ namespace kestr::engine {
 
         Impl(size_t dim, size_t max_elements) : space(dim), max_elements_cached(max_elements) {
             // Optimized HNSW parameters: M=16, ef_construction=200
-            alg_hnsw = std::make_unique<hnswlib::HierarchicalNSW<float>>(&space, max_elements, 16, 200);
+            // Enable allow_replace_deleted (last parameter) to handle updates gracefully
+            alg_hnsw = std::make_unique<hnswlib::HierarchicalNSW<float>>(&space, max_elements, 16, 200, 100, true);
         }
     };
 

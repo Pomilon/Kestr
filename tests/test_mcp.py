@@ -20,16 +20,22 @@ def test_mcp():
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(data_dir, exist_ok=True)
 
+    is_windows = os.name == "nt"
     test_env = {
         **os.environ,
         "XDG_RUNTIME_DIR": runtime_dir,
         "HOME": tmp_dir, 
     }
 
-    # The socket will be at runtime_dir/kestr/kestr.sock according to platform_linux.cpp
-    socket_path = os.path.join(runtime_dir, "kestr", "kestr.sock")
+    if is_windows:
+        test_env["APPDATA"] = os.path.join(tmp_dir, ".config")
+        test_env["LOCALAPPDATA"] = os.path.join(tmp_dir, ".local", "share")
+        socket_path = "\\\\.\\pipe\\kestr.sock"
+    else:
+        socket_path = os.path.join(runtime_dir, "kestr", "kestr.sock")
     
     # We might need a dummy config to avoid downloads or errors
+    os.makedirs(config_dir, exist_ok=True)
     with open(os.path.join(config_dir, "config.json"), "w") as f:
         json.dump({
             "watch_paths": [],
@@ -39,35 +45,65 @@ def test_mcp():
 
     # Use environment variable if provided, otherwise try relative paths
     bin_dir = os.environ.get("CMAKE_BINARY_DIR", os.path.join(cwd, "build"))
-    kestrd_bin = os.path.join(bin_dir, "bin", "kestrd")
-    mcp_bin = os.path.join(bin_dir, "bin", "kestr-mcp")
+    
+    def find_binary(name):
+        ext = ".exe" if is_windows else ""
+        binary_name = name + ext
+        # Try different possible locations
+        candidates = [
+            os.path.join(bin_dir, "bin", binary_name),
+            os.path.join(bin_dir, "bin", "Release", binary_name),
+            os.path.join(bin_dir, "bin", "Debug", binary_name),
+            os.path.join(bin_dir, "Release", binary_name),
+            os.path.join(bin_dir, binary_name),
+            os.path.join(cwd, "build", "bin", binary_name),
+            os.path.join(cwd, "build", "bin", "Release", binary_name)
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                return c
+        return os.path.join(bin_dir, "bin", binary_name) # Fallback
+
+    kestrd_bin = find_binary("kestrd")
+    mcp_bin = find_binary("kestr-mcp")
 
     print(f"DEBUG: bin_dir={bin_dir}")
     print(f"DEBUG: kestrd_bin={kestrd_bin}")
     print(f"DEBUG: mcp_bin={mcp_bin}")
 
     if not os.path.exists(kestrd_bin):
-        # Fallback for manual run from root
-        kestrd_bin = os.path.join(cwd, "build", "bin", "kestrd")
-        mcp_bin = os.path.join(cwd, "build", "bin", "kestr-mcp")
-        print(f"DEBUG: Fallback kestrd_bin={kestrd_bin}")
-
-    if not os.path.exists(kestrd_bin):
         print(f"Error: kestrd binary not found at {kestrd_bin}")
         return False
 
-    print(f"Starting kestrd (socket expected at {socket_path})...")
-    daemon = subprocess.Popen([kestrd_bin], env=test_env)
+    print(f"Starting kestrd (socket/pipe expected at {socket_path})...")
+    daemon = subprocess.Popen([kestrd_bin], env=test_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
-    # Wait for socket to appear
-    max_retries = 50
-    while not os.path.exists(socket_path) and max_retries > 0:
+    # Wait for socket/pipe to appear
+    max_retries = 100
+    socket_ready = False
+    while max_retries > 0:
+        if is_windows:
+            try:
+                with open(socket_path, 'r+b'):
+                    socket_ready = True
+                    break
+            except:
+                pass
+        else:
+            if os.path.exists(socket_path):
+                socket_ready = True
+                break
         time.sleep(0.1)
         max_retries -= 1
     
-    if not os.path.exists(socket_path):
-        print(f"kestrd failed to start or create socket at {socket_path}")
-        daemon.terminate()
+    if not socket_ready:
+        print(f"kestrd failed to start or create socket/pipe at {socket_path}")
+        try:
+            out, err = daemon.communicate(timeout=2)
+            print(f"daemon STDOUT:\n{out}")
+            print(f"daemon STDERR:\n{err}")
+        except:
+            daemon.terminate()
         return False
 
     print(f"Starting kestr-mcp from {mcp_bin}...")

@@ -1,22 +1,29 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(kestr 
-    VERSION 0.1.0 
+project(Kestr 
+    VERSION 0.2.0 
     LANGUAGES CXX C
 )
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Suppress FetchContent warnings and set modern behavior
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # Use extraction time for timestamps
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Platform
 if(WIN32)
-    add_compile_definitions(KESTR_PLATFORM_WINDOWS)
+    add_compile_definitions(KESTR_PLATFORM_WINDOWS NOMINMAX)
     set(KESTR_OS_SRC src/platform/platform_windows.cpp)
 elseif(APPLE)
     add_compile_definitions(KESTR_PLATFORM_MACOS)
     set(KESTR_OS_SRC src/platform/platform_macos.cpp)
+    find_library(CORE_SERVICES_FRAMEWORK CoreServices)
+    set(KESTR_PLATFORM_LIBS ${CORE_SERVICES_FRAMEWORK})
 elseif(UNIX)
     add_compile_definitions(KESTR_PLATFORM_LINUX)
     set(KESTR_OS_SRC src/platform/platform_linux.cpp)
@@ -156,6 +163,77 @@ if(NOT tree_sitter_javascript_POPULATED)
     set_target_properties(tree-sitter-javascript PROPERTIES LINKER_LANGUAGE C)
 endif()
 
+# tree-sitter-java
+FetchContent_Declare(
+    tree_sitter_java
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-java.git
+    GIT_TAG v0.23.0
+)
+FetchContent_GetProperties(tree_sitter_java)
+if(NOT tree_sitter_java_POPULATED)
+    FetchContent_Populate(tree_sitter_java)
+    add_library(tree-sitter-java STATIC 
+        ${tree_sitter_java_SOURCE_DIR}/src/parser.c
+    )
+    target_include_directories(tree-sitter-java PUBLIC ${tree_sitter_java_SOURCE_DIR}/src)
+    target_link_libraries(tree-sitter-java PRIVATE tree-sitter)
+    set_target_properties(tree-sitter-java PROPERTIES LINKER_LANGUAGE C)
+endif()
+
+# tree-sitter-c-sharp
+FetchContent_Declare(
+    tree_sitter_c_sharp
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-c-sharp.git
+    GIT_TAG v0.23.0
+)
+FetchContent_GetProperties(tree_sitter_c_sharp)
+if(NOT tree_sitter_c_sharp_POPULATED)
+    FetchContent_Populate(tree_sitter_c_sharp)
+    add_library(tree-sitter-c-sharp STATIC 
+        ${tree_sitter_c_sharp_SOURCE_DIR}/src/parser.c
+        ${tree_sitter_c_sharp_SOURCE_DIR}/src/scanner.c
+    )
+    target_include_directories(tree-sitter-c-sharp PUBLIC ${tree_sitter_c_sharp_SOURCE_DIR}/src)
+    target_link_libraries(tree-sitter-c-sharp PRIVATE tree-sitter)
+    set_target_properties(tree-sitter-c-sharp PROPERTIES LINKER_LANGUAGE C)
+endif()
+
+# tree-sitter-php
+FetchContent_Declare(
+    tree_sitter_php
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-php.git
+    GIT_TAG v0.23.0
+)
+FetchContent_GetProperties(tree_sitter_php)
+if(NOT tree_sitter_php_POPULATED)
+    FetchContent_Populate(tree_sitter_php)
+    add_library(tree-sitter-php STATIC 
+        ${tree_sitter_php_SOURCE_DIR}/php/src/parser.c
+        ${tree_sitter_php_SOURCE_DIR}/php/src/scanner.c
+    )
+    target_include_directories(tree-sitter-php PUBLIC ${tree_sitter_php_SOURCE_DIR}/php/src)
+    target_link_libraries(tree-sitter-php PRIVATE tree-sitter)
+    set_target_properties(tree-sitter-php PROPERTIES LINKER_LANGUAGE C)
+endif()
+
+# tree-sitter-ruby
+FetchContent_Declare(
+    tree_sitter_ruby
+    GIT_REPOSITORY https://github.com/tree-sitter/tree-sitter-ruby.git
+    GIT_TAG v0.23.0
+)
+FetchContent_GetProperties(tree_sitter_ruby)
+if(NOT tree_sitter_ruby_POPULATED)
+    FetchContent_Populate(tree_sitter_ruby)
+    add_library(tree-sitter-ruby STATIC 
+        ${tree_sitter_ruby_SOURCE_DIR}/src/parser.c
+        ${tree_sitter_ruby_SOURCE_DIR}/src/scanner.c
+    )
+    target_include_directories(tree-sitter-ruby PUBLIC ${tree_sitter_ruby_SOURCE_DIR}/src)
+    target_link_libraries(tree-sitter-ruby PRIVATE tree-sitter)
+    set_target_properties(tree-sitter-ruby PROPERTIES LINKER_LANGUAGE C)
+endif()
+
 # Libraries
 find_package(Threads REQUIRED)
 find_package(SQLite3 REQUIRED)
@@ -168,13 +246,13 @@ add_library(kestr_embed src/engine/embedder.cpp src/engine/embedder_ollama.cpp s
 add_library(kestr_scanner src/engine/scanner.cpp src/engine/text_chunker.cpp src/engine/treesitter_parser.cpp)
 add_library(kestr_librarian src/engine/librarian.cpp)
 
-target_link_libraries(kestr_db PRIVATE SQLite::SQLite3)
-target_link_libraries(kestr_embed PRIVATE ${CURL_LIBRARIES})
+target_link_libraries(kestr_db PUBLIC SQLite::SQLite3)
+target_link_libraries(kestr_embed PRIVATE CURL::libcurl)
 if(TARGET onnxruntime)
     target_link_libraries(kestr_embed PRIVATE onnxruntime)
     target_compile_definitions(kestr_embed PRIVATE KESTR_WITH_ONNX)
 endif()
-target_link_libraries(kestr_scanner PRIVATE 
+target_link_libraries(kestr_scanner PUBLIC 
     kestr_ignore 
     kestr_crypto 
     tree-sitter 
@@ -183,6 +261,10 @@ target_link_libraries(kestr_scanner PRIVATE
     tree-sitter-go
     tree-sitter-rust
     tree-sitter-javascript
+    tree-sitter-java
+    tree-sitter-c-sharp
+    tree-sitter-php
+    tree-sitter-ruby
 )
 
 target_link_libraries(kestr_librarian PRIVATE hnswlib)
@@ -207,41 +289,38 @@ target_link_libraries(kestrd PRIVATE
     tree-sitter-go
     tree-sitter-rust
     tree-sitter-javascript
+    tree-sitter-java
+    tree-sitter-c-sharp
+    tree-sitter-php
+    tree-sitter-ruby
     Threads::Threads
-)
+    ${KESTR_PLATFORM_LIBS}
+    )
 
-# Client Executable
-add_executable(kestr 
+    # Client Executable
+    add_executable(kestr 
     src/client/main.cpp 
     src/platform.hpp
     ${KESTR_OS_SRC}
-)
+    )
 
-target_link_libraries(kestr PRIVATE 
-
+    target_link_libraries(kestr PRIVATE 
     Threads::Threads
+    ${KESTR_PLATFORM_LIBS}
+    )
 
-)
-
-
-
-# MCP Server Executable
-
-add_executable(kestr-mcp
-
+    # MCP Server Executable
+    add_executable(kestr-mcp
     src/mcp/main.cpp
-
     src/platform.hpp
-
     ${KESTR_OS_SRC}
+    )
 
-)
-
-
-
-target_link_libraries(kestr-mcp PRIVATE
+    target_link_libraries(kestr-mcp PRIVATE 
     Threads::Threads
-)
+    ${KESTR_PLATFORM_LIBS}
+    )
+
 
 enable_testing()
 

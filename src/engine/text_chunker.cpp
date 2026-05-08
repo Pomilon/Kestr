@@ -20,13 +20,7 @@ namespace kestr::engine {
         
         auto split_results = recursive_split(content, 1, target_size, separators, 0);
 
-        // Simple merging of sequential SplitResults to reach target_size with overlap.
-        // For simplicity, let's merge until we reach target_size, then slide start.
         size_t overlap_size = static_cast<size_t>(target_size * overlap_percent);
-        
-        // However, recursive_split might return items larger than target_size if no separators are found.
-        // We will just convert SplitResults to Chunks directly for now if they are reasonable, 
-        // or join them to target size.
         
         std::string current_buffer;
         int current_start_line = 1;
@@ -36,7 +30,6 @@ namespace kestr::engine {
             if (current_buffer.size() + sr.text.size() > target_size && !current_buffer.empty()) {
                 result.push_back({current_buffer, current_start_line, current_end_line});
                 
-                // For overlap: take the last part of current_buffer
                 size_t actual_overlap = std::min(current_buffer.size(), overlap_size);
                 std::string overlap_text = current_buffer.substr(current_buffer.size() - actual_overlap);
                 
@@ -59,11 +52,46 @@ namespace kestr::engine {
         return result;
     }
 
+    std::vector<Chunk> TextChunker::chunk_with_breakpoints(const std::string& content, 
+                                                            size_t target_size, 
+                                                            float overlap_percent, 
+                                                            const std::vector<uint32_t>& breakpoints) {
+        std::vector<Chunk> result;
+        if (content.empty()) return result;
+
+        size_t overlap_size = static_cast<size_t>(target_size * overlap_percent);
+        size_t current_start = 0;
+
+        while (current_start < content.size()) {
+            size_t ideal_end = current_start + target_size;
+            if (ideal_end >= content.size()) {
+                result.push_back({content.substr(current_start), 1, 1 + count_newlines(content.substr(current_start))});
+                break;
+            }
+
+            auto it = std::lower_bound(breakpoints.begin(), breakpoints.end(), ideal_end);
+            size_t actual_end = (it == breakpoints.begin()) ? ideal_end : *std::prev(it);
+            
+            if (actual_end < current_start + target_size / 2) {
+                actual_end = ideal_end;
+            }
+
+            result.push_back({content.substr(current_start, actual_end - current_start), 1, 1 + count_newlines(content.substr(current_start, actual_end - current_start))});
+            
+            current_start = actual_end > overlap_size ? actual_end - overlap_size : 0;
+            if (current_start >= actual_end && actual_end < content.size()) {
+                current_start = actual_end;
+            }
+        }
+
+        return result;
+    }
+
     std::vector<TextChunker::SplitResult> TextChunker::recursive_split(const std::string& text, 
-                                                                       int start_line, 
-                                                                       size_t target_size, 
-                                                                       const std::vector<std::string>& separators, 
-                                                                       size_t sep_idx) {
+                                                                        int start_line, 
+                                                                        size_t target_size, 
+                                                                        const std::vector<std::string>& separators, 
+                                                                        size_t sep_idx) {
         std::vector<SplitResult> results;
         if (text.size() <= target_size || sep_idx >= separators.size()) {
             results.push_back({text, start_line, start_line + count_newlines(text)});

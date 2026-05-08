@@ -126,6 +126,7 @@ namespace kestr::platform {
         std::filesystem::path get_config_dir();
         std::filesystem::path get_data_dir();
         bool is_daemon_running();
+        bool is_terminal();
     }
 
 }

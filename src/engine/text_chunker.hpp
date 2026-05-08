@@ -23,6 +23,19 @@ namespace kestr::engine {
                                         size_t target_size = 4000, 
                                         float overlap_percent = 0.15f);
 
+        /**
+         * @brief Chunks text using AST boundaries to avoid splitting mid-expression.
+         * @param content The raw text to chunk.
+         * @param target_size Target chunk size.
+         * @param overlap_percent Overlap between chunks.
+         * @param breakpoints A list of byte offsets where it is safe to split.
+         * @return A vector of Chunk objects.
+         */
+        static std::vector<Chunk> chunk_with_breakpoints(const std::string& content, 
+                                                        size_t target_size, 
+                                                        float overlap_percent, 
+                                                        const std::vector<uint32_t>& breakpoints);
+
     private:
         struct SplitResult {
             std::string text;

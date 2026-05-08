@@ -30,6 +30,15 @@ void send_error(const json& id, int code, const std::string& message) {
 }
 
 int main() {
+    if (kestr::platform::system::is_terminal()) {
+        std::cerr << "Kestr MCP Server (v0.2.0)\n";
+        std::cerr << "This server implements the Model Context Protocol (MCP) over stdio.\n";
+        std::cerr << "It is intended to be run by an MCP client (e.g. Claude Desktop, mcp-inspector).\n";
+        std::cerr << "To test manually, pipe a JSON-RPC request to stdin, for example:\n";
+        std::cerr << "  echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}' | kestr-mcp\n\n";
+        std::cerr << "Waiting for JSON-RPC input...\n";
+    }
+
     std::string line;
     while (std::getline(std::cin, line)) {
         try {
@@ -40,14 +49,14 @@ int main() {
             // 1. Initialize
             if (method == "initialize") {
                 json result = {
-                    {"protocolVersion", "0.1.0"},
+                    {"protocolVersion", "2024-11-05"},
                     {"capabilities", {
-                        {"resources", {}},
-                        {"tools", {}}
+                        {"resources", json::object()},
+                        {"tools", json::object()}
                     }},
                     {"serverInfo", {
                         {"name", "kestr-mcp"},
-                        {"version", "0.1.0"}
+                        {"version", "0.2.0"}
                     }}
                 };
                 send_response(id, result);
@@ -130,11 +139,11 @@ int main() {
                             {"inputSchema", {
                                 {"type", "object"},
                                 {"properties", {
-                                    {"query", {"type", "string"}, {"description", "The search query."}},
-                                    {"limit", {"type", "integer"}, {"description", "Max results."}},
-                                    {"type_filter", {"type", "string"}, {"description", "Filter by symbol type (e.g., function, class)."}},
-                                    {"language", {"type", "string"}, {"description", "Filter by language (e.g., python, cpp)."}},
-                                    {"scope", {"type", "string"}, {"description", "Filter by project root path."}}
+                                    {"query", {{"type", "string"}, {"description", "The search query."}}},
+                                    {"limit", {{"type", "integer"}, {"description", "Max results."}}},
+                                    {"type_filter", {{"type", "string"}, {"description", "Filter by symbol type (e.g., function, class)."}}},
+                                    {"language", {{"type", "string"}, {"description", "Filter by language (e.g., python, cpp)."}}},
+                                    {"scope", {{"type", "string"}, {"description", "Filter by project root path."}}}
                                 }},
                                 {"required", {"query"}}
                             }}
@@ -144,8 +153,63 @@ int main() {
                             {"description", "Get the current status of the Kestr daemon (indexing progress, etc.)."},
                             {"inputSchema", {
                                 {"type", "object"},
-                                {"properties", {}},
+                                {"properties", json::object()},
                                 {"required", json::array()}
+                            }}
+                        },
+                        {
+                            {"name", "kestr_summarize"},
+                            {"description", "Recursively list all files and sizes in a project directory."},
+                            {"inputSchema", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"path", {{"type", "string"}, {"description", "The root directory to summarize."}}}
+                                }},
+                                {"required", {"path"}}
+                            }}
+                        },
+                        {
+                            {"name", "kestr_find_references"},
+                            {"description", "Find all code snippets that reference a specific symbol."},
+                            {"inputSchema", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"symbol", {{"type", "string"}, {"description", "The symbol name to search for."}}}
+                                }},
+                                {"required", {"symbol"}}
+                            }}
+                        },
+                        {
+                            {"name", "kestr_get_definition"},
+                            {"description", "Get the definition of a specific class or function."},
+                            {"inputSchema", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"symbol", {{"type", "string"}, {"description", "The symbol name."}}}
+                                }},
+                                {"required", {"symbol"}}
+                            }}
+                        },
+                        {
+                            {"name", "kestr_list_symbols"},
+                            {"description", "List all symbols (functions, classes) found in a specific file."},
+                            {"inputSchema", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"path", {{"type", "string"}, {"description", "The file path."}}}
+                                }},
+                                {"required", {"path"}}
+                            }}
+                        },
+                        {
+                            {"name", "kestr_watch_add"},
+                            {"description", "Add a new directory to the Kestr file watcher and index it."},
+                            {"inputSchema", {
+                                {"type", "object"},
+                                {"properties", {
+                                    {"path", {{"type", "string"}, {"description", "The directory path to watch."}}}
+                                }},
+                                {"required", {"path"}}
                             }}
                         }
                     }}
@@ -173,9 +237,101 @@ int main() {
                         continue;
                     }
                     auto bridge_resp = json::parse(bridge_resp_str);
+                    std::string text_status = "Kestr Status:\n";
+                    if (bridge_resp.contains("result")) {
+                        for (auto it = bridge_resp["result"].begin(); it != bridge_resp["result"].end(); ++it) {
+                            text_status += it.key() + ": " + it.value().dump() + "\n";
+                        }
+                    }
                     send_response(id, {{"content", {
-                        {{"type", "text"}, {"text", bridge_resp["result"].dump()}}
+                        {{"type", "text"}, {"text", text_status}}
                     }}});
+                    continue;
+                }
+
+                if (name == "kestr_summarize") {
+                    std::string path = args.value("path", "");
+                    json bridge_req = {{"method", "summarize_project"}, {"params", {path}}};
+                    std::string bridge_resp_str = client->send(bridge_req.dump());
+                    auto bridge_resp = json::parse(bridge_resp_str);
+                    
+                    if (bridge_resp.contains("result")) {
+                        std::string summary = "Project Summary for " + path + ":\n\n";
+                        for (const auto& item : bridge_resp["result"]) {
+                            summary += "- " + item.value("path", "") + " (" + std::to_string(item.value("size", 0)) + " bytes)\n";
+                        }
+                        send_response(id, {{"content", {{{"type", "text"}, {"text", summary}}}}});
+                    } else {
+                        send_error(id, -32000, "Daemon error");
+                    }
+                    continue;
+                }
+
+                if (name == "kestr_find_references") {
+                    std::string symbol = args.value("symbol", "");
+                    json bridge_req = {{"method", "find_references"}, {"params", {symbol}}};
+                    std::string bridge_resp_str = client->send(bridge_req.dump());
+                    auto bridge_resp = json::parse(bridge_resp_str);
+
+                    if (bridge_resp.contains("result")) {
+                        std::string text = "References found for '" + symbol + "':\n\n";
+                        for (const auto& item : bridge_resp["result"]) {
+                            text += "--- " + item.value("symbol", "N/A") + " ---\n";
+                            text += item.value("content", "") + "\n\n";
+                        }
+                        send_response(id, {{"content", {{{"type", "text"}, {"text", text}}}}});
+                    } else {
+                        send_error(id, -32000, "Daemon error");
+                    }
+                    continue;
+                }
+
+                if (name == "kestr_get_definition") {
+                    std::string symbol = args.value("symbol", "");
+                    json bridge_req = {{"method", "get_definition"}, {"params", {symbol}}};
+                    std::string bridge_resp_str = client->send(bridge_req.dump());
+                    auto bridge_resp = json::parse(bridge_resp_str);
+
+                    if (bridge_resp.contains("result")) {
+                        auto res = bridge_resp["result"];
+                        std::string text = "Definition for '" + symbol + "':\n\n";
+                        text += res.value("content", "");
+                        send_response(id, {{"content", {{{"type", "text"}, {"text", text}}}}});
+                    } else {
+                        send_error(id, -32000, "Definition not found");
+                    }
+                    continue;
+                }
+
+                if (name == "kestr_list_symbols") {
+                    std::string path = args.value("path", "");
+                    json bridge_req = {{"method", "list_symbols"}, {"params", {path}}};
+                    std::string bridge_resp_str = client->send(bridge_req.dump());
+                    auto bridge_resp = json::parse(bridge_resp_str);
+
+                    if (bridge_resp.contains("result")) {
+                        std::string text = "Symbols in " + path + ":\n\n";
+                        for (const auto& s : bridge_resp["result"]) {
+                            text += "- " + s.value("name", "") + " (" + s.value("type", "") + ") @ line " + std::to_string(s.value("line", 0)) + "\n";
+                        }
+                        send_response(id, {{"content", {{{"type", "text"}, {"text", text}}}}});
+                    } else {
+                        send_error(id, -32000, "File not found or no symbols");
+                    }
+                    continue;
+                }
+
+                if (name == "kestr_watch_add") {
+                    std::string path = args.value("path", "");
+                    json bridge_req = {{"method", "watch_add"}, {"params", {path}}};
+                    std::string bridge_resp_str = client->send(bridge_req.dump());
+                    auto bridge_resp = json::parse(bridge_resp_str);
+
+                    if (bridge_resp.contains("result")) {
+                        send_response(id, {{"content", {{{"type", "text"}, {"text", bridge_resp["result"].get<std::string>()}}}}});
+                    } else {
+                        send_error(id, -32000, bridge_resp.value("error", "Unknown error"));
+                    }
                     continue;
                 }
 

@@ -8,21 +8,20 @@
 
 namespace kestr::engine {
 
-    /**
-     * @brief TreeSitterParser uses Tree-sitter to extract high-fidelity chunks from source code.
-     */
     class TreeSitterParser {
     public:
         TreeSitterParser();
         ~TreeSitterParser();
 
         /**
-         * @brief Parses Python source code and extracts function and class chunks.
-         * @param content The raw source code.
-         * @param language_name The language name (currently only "python" supported).
-         * @return A vector of Chunk objects.
+         * @brief Parses the file and extracts structural chunks (classes/functions).
          */
         std::vector<Chunk> parse(const std::string& content, const std::string& language_name);
+
+        /**
+         * @brief Extracts call sites and the symbols they refer to.
+         */
+        std::vector<std::pair<uint32_t, std::string>> extract_calls(const std::string& content, const std::string& language_name);
 
     private:
         TSParser* m_parser;

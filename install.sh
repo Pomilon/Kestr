@@ -5,10 +5,12 @@ set -e
 echo "🦅 Installing Kestr..."
 
 # 1. Check dependencies (Basic check)
-if ! command -v cmake &> /dev/null; then
-    echo "Error: cmake is required."
-    exit 1
-fi
+for cmd in cmake curl git; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "Error: $cmd is required."
+        exit 1
+    fi
+done
 
 # 2. Build
 echo "🔨 Building..."
@@ -33,8 +35,10 @@ mkdir -p "$CONFIG_DIR"
 if [ ! -f "$CONFIG_DIR/config.json" ]; then
     echo '{
     "memory_mode": "ram",
+    "hybrid_limit": 5000,
     "embedding_backend": "ollama",
-    "embedding_model": "all-minilm"
+    "embedding_model": "nomic-embed-text",
+    "watch_paths": []
 }' > "$CONFIG_DIR/config.json"
     echo "   Created default config.json"
 else
@@ -62,3 +66,4 @@ else
 fi
 
 echo "✅ Installation complete!"
+echo "🚀 Start the daemon and visit http://localhost:8080 for the observability dashboard."

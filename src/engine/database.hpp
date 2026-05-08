@@ -71,13 +71,15 @@ namespace kestr::engine {
 
         /**
          * @brief Searches for chunks containing the given keyword, with optional filters.
+         * Returns a pair of (chunk_id, chunk_data).
          */
-        std::vector<Chunk> query(const std::string& text, int limit = 5, const SearchFilters& filters = {});
+        std::vector<std::pair<int64_t, Chunk>> query(const std::string& text, int limit = 5, const SearchFilters& filters = {});
 
         /**
          * @brief Searches for chunks containing the given keyword.
+         * Returns a pair of (chunk_id, chunk_data).
          */
-        std::vector<Chunk> search_keywords(const std::string& query, int limit = 5);
+        std::vector<std::pair<int64_t, Chunk>> search_keywords(const std::string& query, int limit = 5);
 
         /**
          * @brief Retrieves a chunk by ID.
@@ -100,6 +102,32 @@ namespace kestr::engine {
          */
         size_t count_files();
         size_t count_chunks();
+
+        /**
+         * @brief Returns the dimension of existing embeddings in the database, or 0 if empty.
+         */
+        size_t get_stored_dimension();
+
+        /**
+         * @brief Wipes all chunks and resets is_indexed status for all files.
+         * Used for re-indexing when the model changes.
+         */
+        void wipe_all_chunks();
+
+        /**
+         * @brief Access the internal sqlite3 handle.
+         */
+        sqlite3* get_internal_db() { return m_db; }
+
+        /**
+         * @brief Adds a link between a chunk and a symbol name.
+         */
+        bool add_symbol_link(int64_t from_chunk_id, const std::string& to_symbol, const std::string& type);
+
+        /**
+         * @brief Finds all chunks that link to a specific symbol name.
+         */
+        std::vector<Chunk> find_references(const std::string& symbol_name);
 
     private:
         sqlite3* m_db = nullptr;

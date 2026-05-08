@@ -8,24 +8,49 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential cmake sqlite3 libsqlite3-dev libcurl4-openssl-dev python3
 
+    - name: Install dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: brew install cmake sqlite3 curl
+
+    - name: Install dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: vcpkg install sqlite3[fts5]:x64-windows curl:x64-windows
+
+    - name: Cache dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          build/_deps
+          **/vcpkg_installed
+        key: ${{ runner.os }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/vcpkg.json') }}
+        restore-keys: |
+          ${{ runner.os }}-cmake-
+
     - name: Configure and Build
+      shell: bash
       run: |
-        mkdir build
-        cd build
-        cmake ..
-        make -j$(nproc)
+        CMAKE_FLAGS=""
+        if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          CMAKE_FLAGS="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows"
+        fi
+        cmake -B build $CMAKE_FLAGS
+        cmake --build build --config Release
 
     - name: Run Tests
       run: |
         cd build
-        ctest --output-on-failure
+        ctest -C Release --output-on-failure

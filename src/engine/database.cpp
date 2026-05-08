@@ -9,7 +9,7 @@ namespace kestr::engine {
     Database::~Database() { close(); }
 
     bool Database::open(const std::filesystem::path& path) {
-        if (sqlite3_open(path.c_str(), &m_db) != SQLITE_OK) {
+        if (sqlite3_open(path.string().c_str(), &m_db) != SQLITE_OK) {
             std::cerr << "[Database] Failed to open: " << sqlite3_errmsg(m_db) << "\n";
             return false;
         }
@@ -52,7 +52,15 @@ namespace kestr::engine {
             "  language TEXT,"
             "  embedding BLOB,"
             "  FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE"
-            ");";
+            ");"
+            "CREATE TABLE IF NOT EXISTS symbol_links ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  from_chunk_id INTEGER,"
+            "  to_symbol_name TEXT,"
+            "  link_type TEXT,"
+            "  FOREIGN KEY(from_chunk_id) REFERENCES chunks(id) ON DELETE CASCADE"
+            ");"
+            "CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(content);";
         char* err_msg = nullptr;
         if (sqlite3_exec(m_db, sql, nullptr, nullptr, &err_msg) != SQLITE_OK) {
             std::cerr << "[Database] Schema error: " << err_msg << "\n";
@@ -83,7 +91,7 @@ namespace kestr::engine {
         bool changed = true;
 
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(stmt, 1, path.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 1, path.string().c_str(), -1, SQLITE_STATIC);
             if (sqlite3_step(stmt) == SQLITE_ROW) {
                 std::uintmax_t db_size = sqlite3_column_int64(stmt, 0);
                 int64_t db_mtime = sqlite3_column_int64(stmt, 1);
@@ -100,7 +108,7 @@ namespace kestr::engine {
         bool needs = true;
 
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(stmt, 1, path.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 1, path.string().c_str(), -1, SQLITE_STATIC);
             if (sqlite3_step(stmt) == SQLITE_ROW) {
                 const unsigned char* text = sqlite3_column_text(stmt, 0);
                 if (text) {
@@ -127,7 +135,7 @@ namespace kestr::engine {
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
-        sqlite3_bind_text(stmt, 1, info.path.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 1, info.path.string().c_str(), -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, info.hash.c_str(), -1, SQLITE_STATIC);
         
         auto duration = info.last_write_time.time_since_epoch();
@@ -147,7 +155,7 @@ namespace kestr::engine {
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
         sqlite3_bind_int(stmt, 1, indexed ? 1 : 0);
-        sqlite3_bind_text(stmt, 2, path.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, path.string().c_str(), -1, SQLITE_STATIC);
 
         bool success = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
@@ -155,11 +163,25 @@ namespace kestr::engine {
     }
 
     bool Database::remove_file(const std::filesystem::path& path) {
+        // First, remove from FTS table to maintain consistency
+        const char* fts_cleanup_sql = 
+            "DELETE FROM chunks_fts WHERE rowid IN ("
+            "  SELECT c.id FROM chunks c "
+            "  JOIN files f ON c.file_id = f.id "
+            "  WHERE f.path = ?"
+            ");";
+        sqlite3_stmt* fts_stmt;
+        if (sqlite3_prepare_v2(m_db, fts_cleanup_sql, -1, &fts_stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(fts_stmt, 1, path.string().c_str(), -1, SQLITE_STATIC);
+            sqlite3_step(fts_stmt);
+            sqlite3_finalize(fts_stmt);
+        }
+
         const char* sql = "DELETE FROM files WHERE path = ?;";
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
-        sqlite3_bind_text(stmt, 1, path.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 1, path.string().c_str(), -1, SQLITE_STATIC);
 
         bool success = (sqlite3_step(stmt) == SQLITE_DONE);
         sqlite3_finalize(stmt);
@@ -181,7 +203,7 @@ namespace kestr::engine {
         int64_t file_id = -1;
 
         if (sqlite3_prepare_v2(m_db, id_sql, -1, &id_stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(id_stmt, 1, file_path.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(id_stmt, 1, file_path.string().c_str(), -1, SQLITE_STATIC);
             if (sqlite3_step(id_stmt) == SQLITE_ROW) {
                 file_id = sqlite3_column_int64(id_stmt, 0);
             }
@@ -214,7 +236,18 @@ namespace kestr::engine {
             }
 
             if (sqlite3_step(stmt) == SQLITE_DONE) {
-                ids.push_back(sqlite3_last_insert_rowid(m_db));
+                int64_t chunk_id = sqlite3_last_insert_rowid(m_db);
+                ids.push_back(chunk_id);
+                
+                // Mirror to FTS table
+                const char* fts_sql = "INSERT INTO chunks_fts(rowid, content) VALUES (?, ?);";
+                sqlite3_stmt* fts_stmt;
+                if (sqlite3_prepare_v2(m_db, fts_sql, -1, &fts_stmt, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_int64(fts_stmt, 1, chunk_id);
+                    sqlite3_bind_text(fts_stmt, 2, chunk.content.c_str(), -1, SQLITE_STATIC);
+                    sqlite3_step(fts_stmt);
+                    sqlite3_finalize(fts_stmt);
+                }
             }
             sqlite3_reset(stmt);
         }
@@ -227,21 +260,23 @@ namespace kestr::engine {
         return !insert_chunks(file_path, {chunk}, {embedding}).empty();
     }
 
-    std::vector<Chunk> Database::query(const std::string& text, int limit, const SearchFilters& filters) {
-        std::vector<Chunk> results;
-        std::string sql = "SELECT content, start_line, end_line, symbol_name, symbol_type, project_root, language FROM chunks WHERE content LIKE ?";
+    std::vector<std::pair<int64_t, Chunk>> Database::query(const std::string& text, int limit, const SearchFilters& filters) {
+        std::vector<std::pair<int64_t, Chunk>> results;
+        std::string sql = "SELECT f.rowid, c.content, c.start_line, c.end_line, c.symbol_name, c.symbol_type, c.project_root, c.language "
+                          "FROM chunks c "
+                          "JOIN chunks_fts f ON c.id = f.rowid "
+                          "WHERE chunks_fts MATCH ?";
         
-        if (!filters.type_filter.empty()) sql += " AND symbol_type = ?";
-        if (!filters.language.empty()) sql += " AND language = ?";
-        if (!filters.scope.empty()) sql += " AND project_root = ?";
+        if (!filters.type_filter.empty()) sql += " AND c.symbol_type = ?";
+        if (!filters.language.empty()) sql += " AND c.language = ?";
+        if (!filters.scope.empty()) sql += " AND c.project_root = ?";
         
-        sql += " LIMIT ?;";
+        sql += " ORDER BY rank LIMIT ?;";
 
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
             int bind_idx = 1;
-            std::string pattern = "%" + text + "%";
-            sqlite3_bind_text(stmt, bind_idx++, pattern.c_str(), -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, bind_idx++, text.c_str(), -1, SQLITE_STATIC);
             
             if (!filters.type_filter.empty()) sqlite3_bind_text(stmt, bind_idx++, filters.type_filter.c_str(), -1, SQLITE_STATIC);
             if (!filters.language.empty()) sqlite3_bind_text(stmt, bind_idx++, filters.language.c_str(), -1, SQLITE_STATIC);
@@ -250,23 +285,24 @@ namespace kestr::engine {
             sqlite3_bind_int(stmt, bind_idx++, limit);
 
             while (sqlite3_step(stmt) == SQLITE_ROW) {
+                int64_t id = sqlite3_column_int64(stmt, 0);
                 Chunk chunk;
-                const char* content_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                const char* content_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
                 if (content_ptr) chunk.content = content_ptr;
-                chunk.start_line = sqlite3_column_int(stmt, 1);
-                chunk.end_line = sqlite3_column_int(stmt, 2);
-                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))) chunk.symbol_name = val;
-                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4))) chunk.symbol_type = val;
-                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5))) chunk.project_root = val;
-                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))) chunk.language = val;
-                results.push_back(chunk);
+                chunk.start_line = sqlite3_column_int(stmt, 2);
+                chunk.end_line = sqlite3_column_int(stmt, 3);
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4))) chunk.symbol_name = val;
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5))) chunk.symbol_type = val;
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))) chunk.project_root = val;
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7))) chunk.language = val;
+                results.push_back({id, chunk});
             }
             sqlite3_finalize(stmt);
         }
         return results;
     }
 
-    std::vector<Chunk> Database::search_keywords(const std::string& query_str, int limit) {
+    std::vector<std::pair<int64_t, Chunk>> Database::search_keywords(const std::string& query_str, int limit) {
         return query(query_str, limit);
     }
 
@@ -307,8 +343,8 @@ namespace kestr::engine {
                 int bytes = sqlite3_column_bytes(stmt, 1);
                 
                 if (blob && bytes > 0) {
-                    size_t count = bytes / sizeof(float);
-                    std::vector<float> vec(count);
+                    size_t vec_count = bytes / sizeof(float);
+                    std::vector<float> vec(vec_count);
                     memcpy(vec.data(), blob, bytes);
                     callback(id, vec);
                 }
@@ -350,6 +386,67 @@ namespace kestr::engine {
             sqlite3_finalize(stmt);
         }
         return count;
+    }
+
+    size_t Database::get_stored_dimension() {
+        const char* sql = "SELECT length(embedding) FROM chunks WHERE embedding IS NOT NULL LIMIT 1;";
+        sqlite3_stmt* stmt;
+        size_t dim = 0;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                int bytes = sqlite3_column_int(stmt, 0);
+                dim = bytes / sizeof(float);
+            }
+            sqlite3_finalize(stmt);
+        }
+        return dim;
+    }
+
+    void Database::wipe_all_chunks() {
+        sqlite3_exec(m_db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+        sqlite3_exec(m_db, "DELETE FROM chunks;", nullptr, nullptr, nullptr);
+        sqlite3_exec(m_db, "DELETE FROM chunks_fts;", nullptr, nullptr, nullptr);
+        sqlite3_exec(m_db, "DELETE FROM symbol_links;", nullptr, nullptr, nullptr);
+        sqlite3_exec(m_db, "UPDATE files SET is_indexed = 0;", nullptr, nullptr, nullptr);
+        sqlite3_exec(m_db, "COMMIT;", nullptr, nullptr, nullptr);
+    }
+
+    bool Database::add_symbol_link(int64_t from_chunk_id, const std::string& to_symbol, const std::string& type) {
+        const char* sql = "INSERT INTO symbol_links (from_chunk_id, to_symbol_name, link_type) VALUES (?, ?, ?);";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+        sqlite3_bind_int64(stmt, 1, from_chunk_id);
+        sqlite3_bind_text(stmt, 2, to_symbol.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 3, type.c_str(), -1, SQLITE_STATIC);
+        bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+        sqlite3_finalize(stmt);
+        return success;
+    }
+
+    std::vector<Chunk> Database::find_references(const std::string& symbol_name) {
+        std::vector<Chunk> results;
+        const char* sql = "SELECT c.content, c.start_line, c.end_line, c.symbol_name, c.symbol_type, c.project_root, c.language "
+                          "FROM chunks c "
+                          "JOIN symbol_links l ON c.id = l.from_chunk_id "
+                          "WHERE l.to_symbol_name = ?;";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, symbol_name.c_str(), -1, SQLITE_STATIC);
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                Chunk chunk;
+                const char* content_ptr = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+                if (content_ptr) chunk.content = content_ptr;
+                chunk.start_line = sqlite3_column_int(stmt, 1);
+                chunk.end_line = sqlite3_column_int(stmt, 2);
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3))) chunk.symbol_name = val;
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4))) chunk.symbol_type = val;
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5))) chunk.project_root = val;
+                if (const char* val = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6))) chunk.language = val;
+                results.push_back(chunk);
+            }
+            sqlite3_finalize(stmt);
+        }
+        return results;
     }
 
 } 

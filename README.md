@@ -6,19 +6,28 @@ It implements the **Model Context Protocol (MCP)**, making it plug-and-play comp
 
 ## Features
 
-*   **Sentry (File Watcher):** Real-time, recursive file monitoring using `inotify` (Linux). Automatically detects changes and queues files for re-indexing.
+*   **Sentry (File Watcher):** Real-time, recursive file monitoring. Supports **Linux** (inotify), **macOS** (FSEvents), and **Windows** (ReadDirectoryChangesW). Automatically detects changes and queues files for re-indexing.
 *   **Structural Parsing (Tree-sitter):** High-fidelity AST-based indexing for code. Extracts functions and classes with their names and exact line ranges. Supported languages:
-    *   **Python, C++, Go, Rust, JavaScript, TypeScript.**
+    *   **Python, C++, Go, Rust, JavaScript, TypeScript, Java, C#, PHP, Ruby.**
 *   **Recursive Fallback Chunker:** Smart hierarchical splitting for documentation and unsupported languages. Splits by paragraphs, lines, and spaces with context-preserving overlap.
 *   **Talon (Embeddings):** Flexible embedding engine supporting:
     *   **Local ONNX:** Runs `all-MiniLM-L6-v2` locally using ONNX Runtime.
     *   **Ollama:** Connects to a local Ollama instance (default fallback).
     *   **OpenAI:** Uses OpenAI's `text-embedding-3-small` (requires API key).
-*   **The Librarian (Search):** Hybrid search engine combining:
+*   **The Librarian (Hybrid Search):** State-of-the-art retrieval engine combining:
     *   **Vector Search:** In-memory HNSW index for semantic understanding.
-    *   **Filtered Keyword Search:** Filter by symbol type, language, or project scope.
+    *   **Full-Text Search (FTS5):** Keyword-based precision matching.
+    *   **Reciprocal Rank Fusion (RRF):** Blends semantic and keyword results for optimal relevance.
+*   **Observability Dashboard:** Built-in HTTP dashboard (Port 8080) for real-time monitoring of indexing progress, queue size, and RAM usage.
 *   **The Cache:** Persistent SQLite storage with deep structural metadata.
-*   **MCP Server:** Native integration with the Model Context Protocol.
+*   **MCP Server:** Native integration with the Model Context Protocol (v2024-11-05).
+
+## Platform Support
+
+Kestr is designed to be cross-platform:
+*   **Linux (Primary):** Fully supported and verified.
+*   **macOS & Windows:** Native implementations included (FSEvents/Win32).
+    *   *Note: As the primary development environment is Linux, macOS and Windows support is currently verified primarily through automated CI/CD pipelines.*
 
 ## Installation
 
@@ -131,11 +140,16 @@ To use Kestr with MCP clients (like Claude Desktop), configure the tool to run `
 ```
 
 ### Available MCP Tools & Resources
-*   **Tool:** `kestr_query` - Search the codebase.
-    *   **Params:** `query` (string), `limit` (int), `type_filter` (e.g. 'function'), `language` (e.g. 'python'), `scope` (project root).
-*   **Tool:** `kestr_status` - Get daemon indexing status and stats.
-*   **Resource:** `kestr://<path>` - Read any indexed file content.
-*   **Resource List:** Browse all indexed files.
+*   **Tool:** `kestr_query` - Hybrid Semantic & Keyword search.
+    *   **Params:** `query` (string), `limit` (int), `type_filter`, `language`, `scope`.
+*   **Tool:** `kestr_summarize` - Recursively map project structure and file sizes.
+*   **Tool:** `kestr_find_references` - Find all code snippets referencing a specific symbol.
+*   **Tool:** `kestr_get_definition` - Jump directly to function or class definitions.
+*   **Tool:** `kestr_list_symbols` - List all symbols defined in a specific file.
+*   **Tool:** `kestr_watch_add` - Add new project directories to the index dynamically.
+*   **Tool:** `kestr_status` - Get daemon health, queue status, and indexing stats.
+*   **Resource:** `kestr://<path>` - Read any indexed file content directly.
+*   **Resource List:** Browse all files currently in the index.
 
 ## License
 MIT

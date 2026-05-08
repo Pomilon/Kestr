@@ -330,6 +330,9 @@ namespace kestr::platform {
             }
             return false;
         }
+        bool is_terminal() {
+            return isatty(fileno(stdin));
+        }
     }
 
 }
